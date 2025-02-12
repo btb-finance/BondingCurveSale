@@ -1,0 +1,211 @@
+token name OPOSSUM (opos)
+
+System Architecture Draft
+
+1. Core Components
+	1.	BondingCurveSale Contract
+	•	This single contract will:
+	•	Hold a pre-funded balance of your existing ERC20 tokens (the “vaulted” approach).
+	•	Implement the bonding curve logic (closed-form math for buy/sell).
+	•	Collect and distribute fees.
+	•	Interact with Uniswap (v3 or future v4) via the INonfungiblePositionManager-like interface to manage liquidity positions.
+	2.	Existing ERC20 Token
+	•	Pre-deployed contract.
+	•	You’ll transfer (e.g.) up to 1 billion tokens into the BondingCurveSale contract at deployment time.
+	•	When users buy, the sale contract sends tokens out; when they sell, tokens flow back in.
+	3.	Uniswap Position NFT
+	•	The BondingCurveSale contract will own one (or more) liquidity position(s).
+	•	Each buy or sell can trigger re-centering of the liquidity range ±5% around the current price.
+	4.	Admin/Owner Wallet
+	•	Can adjust certain parameters (e.g., fee recipient address, base price, re-centering logic).
+	•	Can withdraw leftover WBTC or ETH from the contract if needed (subject to your rules).
+	5.	Fee Recipient Wallet
+	•	Receives the 5% buy fee and 10% sell fee immediately (or the contract can accumulate and send it out each transaction).
+
+2. State Variables & Configuration
+
+Inside the BondingCurveSale contract, we’ll track:
+	1.	Token Balances
+	•	tokenAddress (the ERC20 being sold).
+	•	The contract’s own balance of that token. (Increases when users sell, decreases when users buy.)
+	2.	Bonding Curve Tracking
+	•	basePrice (￼): The starting price in ETH or a pegged value.
+	•	totalSold or N: Tracks how many net tokens have been sold via the bonding curve (buys - sells).
+	•	For fractional token amounts, N can be a floating-point scaled integer (e.g., a fixed-point representation).
+	3.	Fees
+	•	buyFeeBP = 5 (5% basis points).
+	•	sellFeeBP = 10 (10% basis points).
+	•	feeRecipient: The address that receives fees.
+	4.	Uniswap Liquidity
+	•	positionManager: Address of the Uniswap (v3-like) NonfungiblePositionManager.
+	•	poolFee: The Uniswap pool fee tier (e.g., 0.3%).
+	•	wbtcAddress: Address of the WBTC token.
+	•	currentPositionId: The NFT ID representing the active liquidity position.
+	•	A structure to track tickLower and tickUpper that define ±5% range around the current price.
+	5.	Other Bookkeeping
+	•	reentrancyGuard: A simple modifier to prevent reentrant calls.
+	•	Possibly an “oracle price feed” if you want a reference for the base price in terms of ETH vs. USD (optional, if you want it dynamic).
+
+3. Bonding Curve Logic
+
+3.1. Price Calculation
+
+For a net N tokens sold, the current token price ￼ is:
+￼
+
+Where:
+	•	￼ = basePrice (the initial reference price in ETH).
+	•	N can be a large integer or a fixed-point number (if fractional tokens are allowed).
+
+3.2. Buy Amount Calculation
+
+If a user wants to buy x tokens, the total cost (before fees) is the discrete sum of each incremental 1% step. In closed form:
+
+￼
+
+Then we apply the 5% fee on top of that cost.
+
+3.3. Sell Amount Calculation
+
+If a user sells x tokens, we effectively pay out the sum:
+
+￼
+
+Then we subtract the 10% fee from this payout.
+
+(If partial tokens are allowed, x can be fractional, and the formula remains valid if we treat N as a fixed-point number. We’ll handle the exponent logic carefully on-chain.)
+
+3.4. Updating N
+	•	On Buy: After calculating cost for x tokens, we do N += x.
+	•	On Sell: After calculating payout for x tokens, we do N -= x.
+
+(We’ll store N in a scaled integer format to handle fractional amounts, e.g. 1e18 representing “1 token.”)
+
+4. Buy Workflow
+	1.	User Calls buy(xTokens)
+	•	The user sends enough ETH to cover:
+￼
+	•	The contract reverts if not enough ETH is provided.
+	2.	Bonding Curve Price Calculation
+	•	Calculate baseCost = Cost(x).
+	•	Calculate feeAmount = baseCost * 5%.
+	•	Verify the user’s msg.value >= baseCost + feeAmount. Refund any excess ETH if needed.
+	3.	Fee Transfer
+	•	Immediately send feeAmount to feeRecipient.
+	4.	Token Transfer to Buyer
+	•	The contract transfers x tokens (plus any fraction) from its own balance to the buyer.
+	5.	Update N
+	•	N += x.
+	6.	Uniswap Liquidity Management (Optional if you prefer it in the same transaction)
+	1.	Take a portion (say 50%) of the baseCost or the leftover ETH after paying fees.
+	2.	Swap half of it to WBTC.
+	3.	Increase (or create) a liquidity position around ±5% ticks from the current ETH/WBTC price.
+	4.	If we need to “re-center” fully, we might remove the old position first, then create a new position.
+	7.	Emit Event
+	•	event TokensBought(address indexed buyer, uint256 amountTokens, uint256 costETH);
+
+5. Sell Workflow
+	1.	User Calls sell(xTokens)
+	•	The user must have approved xTokens for the BondingCurveSale contract to spend.
+	2.	Bonding Curve Payout Calculation
+	•	basePayout = Payout(x).
+	•	feeAmount = basePayout * 10%.
+	•	finalPayout = basePayout - feeAmount.
+	3.	Fee Transfer
+	•	The contract sends feeAmount to feeRecipient.
+	4.	Token Transfer from Seller
+	•	The contract pulls x tokens from the seller’s balance into the contract.
+	5.	Update N
+	•	N -= x.
+	6.	Uniswap Liquidity Removal
+	•	Remove enough liquidity to obtain finalPayout in ETH (we might remove more if needed to re-center).
+	•	Swap the removed WBTC portion back to ETH.
+	•	Sum up the ETH from the removal + contract’s existing ETH.
+	•	Pay finalPayout to the seller.
+	7.	Optional Re-Center
+	•	If the plan is to re-center on every sell, remove the entire position, recalculate new ticks, then add the position again around ±5%.
+	•	If we only do partial removal, we simply adjust the existing position.
+	8.	Emit Event
+	•	event TokensSold(address indexed seller, uint256 amountTokens, uint256 payoutETH);
+
+6. Uniswap (v3-like) Liquidity Management
+
+Below is a simplified approach (the actual code will use Uniswap’s NonfungiblePositionManager interface calls):
+	1.	Determining Current Price
+	•	We can query the ETH/WBTC pool for the current sqrtPriceX96.
+	•	Convert that to a real price ratio (WBTC per 1 ETH or vice versa).
+	2.	Calculating Tick Range (±5%)
+	•	Let currentTick = the tick from the sqrtPrice.
+	•	±5% in price corresponds to ± a certain number of ticks. (We can approximate ticks for a 5% range. For example, if 1 tick ~ 0.0001% price change, we can compute the offset in ticks.)
+	3.	Position Creation or Increase
+	•	Approve WBTC + ETH to the position manager.
+	•	Call mint(...) or increaseLiquidity(...) with the chosen tickLower and tickUpper.
+	•	If it’s a new position, store the tokenId. If it’s an existing position, we use tokenId to increase liquidity.
+	4.	Position Removal
+	•	Call decreaseLiquidity(...) and collect(...) on the existing tokenId.
+	•	Convert the collected WBTC to ETH if needed (via a swap in the Uniswap router).
+	5.	Re-Center
+	•	We typically must:
+	•	Remove liquidity from the old range.
+	•	Immediately re-add in a fresh range around the new price.
+
+Because Uniswap v4 is still conceptual, we’ll assume the interface and approach is very similar to v3’s INonfungiblePositionManager.
+
+7. Fees & Distribution
+
+Each transaction collects fees:
+	•	5% on Buys
+	•	Immediately deducted from the user’s ETH payment.
+	•	Sent to feeRecipient.
+	•	10% on Sells
+	•	Deducted from the user’s final payout.
+	•	Immediately sent to feeRecipient.
+
+(Optionally, you can store them in the contract and have an admin function to withdraw them in batches. But from your clarifications, immediate distribution is simpler.)
+
+8. Security & Access
+	•	Ownership/Administration
+	•	The contract will have an owner who can:
+	•	Change feeRecipient.
+	•	Change the base price (basePrice) if needed.
+	•	Change the ±5% range or the logic for re-centering (e.g., if 5% becomes 10%).
+	•	Withdraw any leftover WBTC/ETH from the contract if no longer needed.
+	•	ReentrancyGuard
+	•	Each buy/sell function will use a nonReentrant modifier from OpenZeppelin to prevent malicious calls.
+	•	Safe Transfers
+	•	Use SafeERC20 from OpenZeppelin for token transfers.
+	•	Use Address.sendValue or call.value with checks for ETH transfers.
+	•	Bounds & Edge Cases
+	•	Ensure the contract doesn’t sell more tokens than it holds (check contractTokenBalance >= x).
+	•	If N becomes very large, exponentiation (1.01)^N might be huge. We’ll implement fixed-point exponentiation with checks for overflow.
+
+9. Putting It All Together
+
+High-Level Flow
+	1.	Deployment
+	•	Deploy BondingCurveSale with parameters: tokenAddress, basePrice, feeRecipient, positionManager, etc.
+	•	Transfer up to 1 billion tokens from your project wallet to the sale contract.
+	2.	Buying
+	•	The user calls buy(x), sending enough ETH.
+	•	The contract calculates cost, collects fees, updates the bonding curve, sends the tokens, re-centers Uniswap liquidity if desired.
+	3.	Selling
+	•	The user calls sell(x), approving x tokens first.
+	•	The contract calculates payout, sends fees, updates the bonding curve, removes some or all Uniswap liquidity, and pays the user in ETH.
+	4.	Liquidity Position
+	•	The contract manages a single position (or multiple positions if needed) in the ETH/WBTC pool, re-centering around ±5% each time.
+	5.	Fee Handling
+	•	Instantaneous distribution to feeRecipient on each transaction.
+
+10. Final Notes & Next Steps
+	1.	Math Library: We’ll create or integrate a small library for:
+	•	Exponentiation with base 1.01 in fixed-point arithmetic.
+	•	Closed-form sum for buy/sell with partial tokens.
+	2.	Gas Optimization:
+	•	Because you’re on a cheaper L2 (Base), frequent re-centering is feasible, but we’ll still be mindful of excessive memory or loops.
+	•	We’ll rely on the closed-form formula to avoid big loops for large x.
+	3.	Upgradeability:
+	•	If you want future changes without redeployment, we can incorporate OpenZeppelin’s Proxy pattern.
+	•	Otherwise, we’ll keep it a simple, non-upgradeable contract.
+	4.	Audits & Testing:
+	•	For production, you’ll want thorough testing (e.g., hardhat or Foundry tests) and a security audit.
+
