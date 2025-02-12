@@ -45,6 +45,17 @@ library BondingCurveMath {
     }
 
     /**
+     * @notice Get current token price based on number of tokens sold
+     * @param basePrice Initial price in wei
+     * @param netTokensSold Number of tokens sold
+     * @return Current token price in wei
+     */
+    function getCurrentPrice(uint256 basePrice, uint256 netTokensSold) public pure returns (uint256) {
+        if (netTokensSold == 0) return basePrice;
+        return (basePrice * pow1p01(netTokensSold)) / ONE_IN_WEI;
+    }
+
+    /**
      * @notice Computes the cost (in wei) to buy `x` tokens from the bonding curve
      * @param basePrice  P0 in wei
      * @param N          Current net tokens sold (integer, no decimals)
