@@ -5,8 +5,14 @@ import "@openzeppelin/contracts/utils/Context.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
-import "./OpossumToken.sol";
+
+interface IMintable {
+    function mint(address to, uint256 amount) external;
+}
+
+interface IBurnable {
+    function burn(uint256 amount) external;
+}
 
 contract OPOSExchange is ReentrancyGuard, Ownable {
     address public tokenAddress;
@@ -94,7 +100,7 @@ contract OPOSExchange is ReentrancyGuard, Ownable {
         }
  
         // Mint new tokens instead of transferring
-        OpossumToken(tokenAddress).mint(msg.sender, tokensToBuy);
+        IMintable(tokenAddress).mint(msg.sender, tokensToBuy);
  
         emit OpossumCaught(msg.sender, tokensToBuy, usdcAmount);
     }
@@ -111,7 +117,7 @@ contract OPOSExchange is ReentrancyGuard, Ownable {
         require(usdcToReceive <= currentUsdcBalance, "Not enough coins in the zoo");
  
         require(token.transferFrom(msg.sender, address(this), tokensToSell), "Failed to catch");
-        ERC20Burnable(tokenAddress).burn(tokensToSell);
+        IBurnable(tokenAddress).burn(tokensToSell);
         
         require(usdc.transfer(msg.sender, usdcToReceive), "No reward received");
  
