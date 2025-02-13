@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-
 import "@openzeppelin/contracts/utils/Context.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
+import "./OpossumToken.sol";
 
 contract OPOSExchange is ReentrancyGuard, Ownable {
     address public tokenAddress;
@@ -17,19 +18,20 @@ contract OPOSExchange is ReentrancyGuard, Ownable {
     uint256 public feePercentage = 1;
     uint256 public startingPrice = 1e16;
  
-    bool public playingDead; 
- 
-    mapping(address => bool) public isNightwalker;  
- 
-    event OpossumCaught(address indexed buyer, uint256 tokensBought, uint256 usdcSpent);  
-    event OpossumEscaped(address indexed seller, uint256 tokensSold, uint256 usdcReceived);  
-    event NewTrickLearned(uint256 oldFee, uint256 newFee); 
- 
-    constructor(address _tokenAddress, address _usdcTokenAddress) {
+    bool public playingDead;
+    
+    mapping(address => bool) public isNightwalker;
+
+    event OpossumCaught(address indexed buyer, uint256 tokensBought, uint256 usdcSpent);
+    event OpossumEscaped(address indexed seller, uint256 tokensSold, uint256 usdcReceived);
+    event NewTrickLearned(uint256 oldFee, uint256 newFee);
+
+    constructor(address _tokenAddress, address _usdcTokenAddress) Ownable(msg.sender) {
         tokenAddress = _tokenAddress;
         token = IERC20(_tokenAddress);
         usdcTokenAddress = _usdcTokenAddress;
         usdc = IERC20(_usdcTokenAddress);
+        playingDead = false;
     }
  
     modifier notPlayingDead() {
@@ -91,7 +93,8 @@ contract OPOSExchange is ReentrancyGuard, Ownable {
             require(usdc.transfer(owner(), fee), "Failed to pay zookeeper");
         }
  
-        require(token.transfer(msg.sender, tokensToBuy), "Opossum escaped");
+        // Mint new tokens instead of transferring
+        OpossumToken(tokenAddress).mint(msg.sender, tokensToBuy);
  
         emit OpossumCaught(msg.sender, tokensToBuy, usdcAmount);
     }
@@ -108,6 +111,8 @@ contract OPOSExchange is ReentrancyGuard, Ownable {
         require(usdcToReceive <= currentUsdcBalance, "Not enough coins in the zoo");
  
         require(token.transferFrom(msg.sender, address(this), tokensToSell), "Failed to catch");
+        ERC20Burnable(tokenAddress).burn(tokensToSell);
+        
         require(usdc.transfer(msg.sender, usdcToReceive), "No reward received");
  
         if (!isNightwalker[msg.sender]) {
