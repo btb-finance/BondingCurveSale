@@ -10,9 +10,9 @@ remappings = [
 ]
 
 [rpc_endpoints]
-optimism_sepolia = "${OPTIMISM_SEPOLIA_RPC_URL}"
+optimism_sepolia = "${OP_SEPOLIA_RPC_URL}"
 
 [etherscan]
-optimism_sepolia = { key = "${ETHERSCAN_API_KEY}" }
+optimism_sepolia = { key = "${OPTIMISM_ETHERSCAN_API_KEY}", url = "https://api-sepolia-optimistic.etherscan.io/api" }
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

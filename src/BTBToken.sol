@@ -7,10 +7,5 @@ import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20P
 
 /// @custom:security-contact hello@BTB.finance
 contract BTBYield is ERC20, ERC20Permit {
-    constructor(address recipient)
-        ERC20("BTB Yield", "BTBY")
-        ERC20Permit("BTB Yield")
-    {
-        _mint(recipient, 1000000000 * 10 ** decimals());
-    }
+    constructor() ERC20("BTB Yield", "BTBY") ERC20Permit("BTB Yield") {}
 }

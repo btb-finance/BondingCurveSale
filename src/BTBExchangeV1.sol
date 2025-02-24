@@ -14,13 +14,14 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
     IERC20 public immutable token;      // The token being sold
     IERC20 public immutable usdc;       // USDC stablecoin
     uint256 public constant PRECISION = 1e6;  // USDC uses 6 decimals
+    uint256 public constant TOKEN_PRECISION = 1e18; // Token uses 18 decimals
     uint256 public totalTokensSold;     // Tracks tokens sold
     uint256 public totalUsdcRaised;     // Tracks total USDC ever received including fees
     uint256 public buyFee;              // Fee percentage for buying (in basis points, e.g., 100 = 1%)
     uint256 public sellFee;             // Fee percentage for selling (in basis points)
     uint256 public constant FEE_PRECISION = 10000;  // 100% = 10000 basis points
     uint256 public lastTradeBlock;      // Last block where a trade occurred
-    uint256 public constant MIN_PRICE = PRECISION;  // Minimum price of 1 USDC
+    uint256 public constant MIN_PRICE = 10000;  // Minimum price of 0.01 USDC (1e4 because USDC has 6 decimals)
 
     // Events
     event TokensPurchased(address indexed buyer, uint256 usdcAmount, uint256 tokenAmount, uint256 fee);
@@ -49,43 +50,18 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         sellFee = _sellFee;
     }
 
-    // Price = (Total USDC raised historically) / (Total Supply - Contract's Token Balance)
     function getCurrentPrice() public view returns (uint256) {
         uint256 totalSupply = token.totalSupply();
         uint256 contractTokenBalance = token.balanceOf(address(this));
         
         if (totalSupply <= contractTokenBalance) {
-            return MIN_PRICE; // Return minimum price if no tokens in circulation
+            return MIN_PRICE; // Return minimum price of 0.01 USDC
         }
         
         uint256 circulatingSupply = totalSupply - contractTokenBalance;
-        uint256 price = (totalUsdcRaised * PRECISION) / circulatingSupply;
+        uint256 price = (totalUsdcRaised * PRECISION) / (circulatingSupply / TOKEN_PRECISION);
         
         return price < MIN_PRICE ? MIN_PRICE : price;
-    }
-
-    function getTokenAmount(uint256 usdcAmount) public view returns (uint256) {
-        require(usdcAmount > 0, "USDC amount must be > 0");
-        uint256 price = getCurrentPrice();
-        uint256 feeAmount = (usdcAmount * buyFee) / FEE_PRECISION;
-        uint256 usdcAfterFee = usdcAmount - feeAmount;
-        return (usdcAfterFee * PRECISION) / price;
-    }
-
-    function getUsdcAmount(uint256 tokenAmount) public view returns (uint256) {
-        require(tokenAmount > 0, "Token amount must be > 0");
-        uint256 price = getCurrentPrice();
-        uint256 usdcBeforeFee = (tokenAmount * price) / PRECISION;
-        uint256 feeAmount = (usdcBeforeFee * sellFee) / FEE_PRECISION;
-        return usdcBeforeFee - feeAmount;
-    }
-
-    function getTotalSupplyPrice() public view returns (uint256) {
-        uint256 totalSupply = token.totalSupply();
-        uint256 contractBalance = token.balanceOf(address(this));
-        uint256 circulatingSupply = totalSupply - contractBalance;
-        uint256 price = getCurrentPrice();
-        return (circulatingSupply * price) / PRECISION;
     }
 
     function buyTokens(uint256 usdcAmount) external nonReentrant whenNotPaused {
@@ -95,17 +71,22 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         // Calculate fee and tokens
         uint256 feeAmount = (usdcAmount * buyFee) / FEE_PRECISION;
         uint256 usdcAfterFee = usdcAmount - feeAmount;
-        uint256 tokenAmount = (usdcAfterFee * PRECISION) / getCurrentPrice();
+        
+        // Calculate token amount accounting for decimals
+        // usdcAfterFee has 6 decimals, price has 6 decimals
+        // We want the result to have 18 decimals (TOKEN_PRECISION)
+        uint256 tokenAmount = (usdcAfterFee * TOKEN_PRECISION) / getCurrentPrice();
+        
         require(token.balanceOf(address(this)) >= tokenAmount, "Insufficient tokens in contract");
 
         // Update state
+        totalUsdcRaised += usdcAmount;
         totalTokensSold += tokenAmount;
-        totalUsdcRaised += usdcAmount; // Include full amount with fee
         lastTradeBlock = block.number;
 
-        // Transfer USDC and tokens
-        usdc.safeTransferFrom(msg.sender, address(this), usdcAmount);
+        // Transfer tokens and USDC
         token.safeTransfer(msg.sender, tokenAmount);
+        usdc.safeTransferFrom(msg.sender, address(this), usdcAmount);
 
         emit TokensPurchased(msg.sender, usdcAmount, tokenAmount, feeAmount);
     }
@@ -114,14 +95,17 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         require(tokenAmount > 0, "Token amount must be > 0");
         if (block.number == lastTradeBlock) revert SameBlockTrade();
 
-        // Calculate USDC amount and fee
         uint256 price = getCurrentPrice();
-        uint256 usdcBeforeFee = (tokenAmount * price) / PRECISION;
-        uint256 feeAmount = (usdcBeforeFee * sellFee) / FEE_PRECISION;
-        uint256 usdcAfterFee = usdcBeforeFee - feeAmount;
-        require(usdc.balanceOf(address(this)) >= usdcAfterFee, "Insufficient USDC in contract");
+        
+        // Calculate USDC amount accounting for decimals
+        // tokenAmount has 18 decimals, price has 6 decimals
+        // We want the result to have 6 decimals (PRECISION)
+        uint256 usdcAmount = (tokenAmount * price) / TOKEN_PRECISION;
+        uint256 feeAmount = (usdcAmount * sellFee) / FEE_PRECISION;
+        uint256 usdcAfterFee = usdcAmount - feeAmount;
 
         // Update state
+        totalUsdcRaised -= usdcAmount;
         totalTokensSold -= tokenAmount;
         lastTradeBlock = block.number;
 
@@ -132,30 +116,22 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         emit TokensSold(msg.sender, tokenAmount, usdcAfterFee, feeAmount);
     }
 
-    function updateFees(uint256 _buyFee, uint256 _sellFee) external onlyOwner {
-        require(_buyFee <= FEE_PRECISION, "Buy fee too high");
-        require(_sellFee <= FEE_PRECISION, "Sell fee too high");
-        buyFee = _buyFee;
-        sellFee = _sellFee;
-        emit FeesUpdated(_buyFee, _sellFee);
-    }
-
-    function withdrawTokens(uint256 amount) external onlyOwner {
-        require(amount > 0, "Amount must be > 0");
-        token.safeTransfer(msg.sender, amount);
+    function updateFees(uint256 newBuyFee, uint256 newSellFee) external onlyOwner {
+        require(newBuyFee <= FEE_PRECISION, "Buy fee too high");
+        require(newSellFee <= FEE_PRECISION, "Sell fee too high");
+        buyFee = newBuyFee;
+        sellFee = newSellFee;
+        emit FeesUpdated(newBuyFee, newSellFee);
     }
 
     function withdrawUsdc(uint256 amount) external onlyOwner {
-        require(amount > 0, "Amount must be > 0");
         usdc.safeTransfer(msg.sender, amount);
     }
 
-    /// @notice Pause the contract
     function pause() external onlyOwner {
         _pause();
     }
 
-    /// @notice Unpause the contract
     function unpause() external onlyOwner {
         _unpause();
     }
