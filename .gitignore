@@ -1,0 +1,41 @@
+# Compiler files
+cache/
+out/
+
+# Ignores development broadcast logs
+!/broadcast
+/broadcast/*/31337/
+/broadcast/**/dry-run/
+
+# Docs
+docs/
+
+# Dotenv file
+.env
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Dependency directories
+node_modules/
+lib/
+
+# Local configuration
+.windsurfrules
+
+# Coverage directory
+coverage/
+coverage.json
+
+# Gas report
+gas-report.txt
+
+# Hardhat files
+artifacts/
+typechain/
+typechain-types/
+
