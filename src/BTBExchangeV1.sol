@@ -8,7 +8,7 @@ import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 
-contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
+contract BTBExchangeV1 is Ownable(msg.sender), ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
     using Address for address;
 
@@ -128,7 +128,6 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         uint256 usdcAmount = (tokenAmount * price) / TOKEN_PRECISION;
         uint256 totalFeeAmount = (usdcAmount * sellFee) / FEE_PRECISION;
         uint256 adminFeeAmount = (usdcAmount * ADMIN_FEE_PORTION) / FEE_PRECISION;
-        uint256 priceContributionAmount = (usdcAmount * PRICE_CONTRIBUTION_PORTION) / FEE_PRECISION;
         uint256 usdcAfterFee = usdcAmount - totalFeeAmount;
 
         uint256 totalUsdcNeeded = usdcAfterFee;
