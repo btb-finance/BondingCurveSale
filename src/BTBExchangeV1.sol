@@ -28,16 +28,17 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
     uint256 public lastTradeBlock;
     uint256 public constant MIN_PRICE = 10000;
     bool public emergencyMode;
-    uint256 public priceMultiplier = PRECISION;
-    uint256 public constant SELL_PRICE_INCREASE = 20;
+    uint256 public priceIncreaseFactor = 20;
+    uint256 public currentPrice;
 
-    event TokensPurchased(address indexed buyer, uint256 usdcAmount, uint256 tokenAmount, uint256 priceContribution, uint256 adminFee);
-    event TokensSold(address indexed seller, uint256 tokenAmount, uint256 usdcAmount, uint256 priceContribution, uint256 adminFee, uint256 newPriceMultiplier);
+    event TokensPurchased(address indexed buyer, uint256 usdcAmount, uint256 tokenAmount, uint256 priceContribution, uint256 adminFee, uint256 newPrice);
+    event TokensSold(address indexed seller, uint256 tokenAmount, uint256 usdcAmount, uint256 priceContribution, uint256 adminFee, uint256 newPrice);
     event FeesUpdated(uint256 newBuyFee, uint256 newSellFee);
     event AdminAddressUpdated(address indexed newAdmin);
     event TokensWithdrawn(address indexed token, uint256 amount);
     event ReserveUpdated(uint256 newReserve);
     event EmergencyModeSet(bool activated);
+    event PriceIncreaseFactorUpdated(uint256 newFactor);
 
     error SameBlockTrade();
     error PriceBelowMinimum();
@@ -64,9 +65,14 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
         token = IERC20(_token);
         usdc = IERC20(_usdc);
         adminAddress = _adminAddress;
+        currentPrice = MIN_PRICE;
     }
 
     function getCurrentPrice() public view returns (uint256) {
+        return currentPrice < MIN_PRICE ? MIN_PRICE : currentPrice;
+    }
+
+    function calculateBasePrice() internal view returns (uint256) {
         uint256 totalSupply = token.totalSupply();
         uint256 contractTokenBalance = token.balanceOf(address(this));
         
@@ -78,9 +84,7 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
         }
         
         uint256 basePrice = (totalUsdcContributed * PRECISION * TOKEN_PRECISION) / circulatingSupply;
-        uint256 adjustedPrice = (basePrice * priceMultiplier) / PRECISION;
-        
-        return adjustedPrice < MIN_PRICE ? MIN_PRICE : adjustedPrice;
+        return basePrice < MIN_PRICE ? MIN_PRICE : basePrice;
     }
 
     function buyTokens(uint256 usdcAmount) external nonReentrant whenNotPaused notEmergency {
@@ -101,6 +105,12 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
         usdcReserve += usdcAfterFee;
         totalTokensSold += tokenAmount;
         lastTradeBlock = block.number;
+        
+        uint256 basePrice = calculateBasePrice();
+        currentPrice = price + (price * priceIncreaseFactor / FEE_PRECISION);
+        if (currentPrice < basePrice) {
+            currentPrice = basePrice;
+        }
 
         bool success1 = token.transfer(msg.sender, tokenAmount);
         if (!success1) revert TransferFailed();
@@ -111,7 +121,7 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
         bool success3 = usdc.transferFrom(msg.sender, adminAddress, adminFeeAmount);
         if (!success3) revert TransferFailed();
 
-        emit TokensPurchased(msg.sender, usdcAmount, tokenAmount, priceContributionAmount, adminFeeAmount);
+        emit TokensPurchased(msg.sender, usdcAmount, tokenAmount, priceContributionAmount, adminFeeAmount, currentPrice);
     }
 
     function sellTokens(uint256 tokenAmount) external nonReentrant whenNotPaused notEmergency {
@@ -128,7 +138,7 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
 
         if (usdcAfterFee > usdcReserve) revert InsufficientReserve();
 
-        priceMultiplier = priceMultiplier + (priceMultiplier * SELL_PRICE_INCREASE / FEE_PRECISION);
+        currentPrice = price + (price * priceIncreaseFactor / FEE_PRECISION);
 
         usdcReserve -= usdcAfterFee;
         totalTokensSold -= tokenAmount;
@@ -145,7 +155,7 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
             if (!success3) revert TransferFailed();
         }
 
-        emit TokensSold(msg.sender, tokenAmount, usdcAfterFee, priceContributionAmount, adminFeeAmount, priceMultiplier);
+        emit TokensSold(msg.sender, tokenAmount, usdcAfterFee, priceContributionAmount, adminFeeAmount, currentPrice);
     }
 
     function updateFees(uint256 newBuyFee, uint256 newSellFee) external onlyOwner {
@@ -154,6 +164,12 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
         buyFee = newBuyFee;
         sellFee = newSellFee;
         emit FeesUpdated(newBuyFee, newSellFee);
+    }
+
+    function updatePriceIncreaseFactor(uint256 newFactor) external onlyOwner {
+        require(newFactor <= FEE_PRECISION, "Factor too high");
+        priceIncreaseFactor = newFactor;
+        emit PriceIncreaseFactorUpdated(newFactor);
     }
 
     function updateAdminAddress(address newAdmin) external onlyOwner {
@@ -201,8 +217,8 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
         emit TokensWithdrawn(tokenAddress, amount);
     }
 
-    function resetPriceMultiplier() external onlyOwner {
-        priceMultiplier = PRECISION;
+    function resetPrice() external onlyOwner {
+        currentPrice = calculateBasePrice();
     }
 
     function pause() external onlyOwner {
