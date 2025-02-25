@@ -29,8 +29,7 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
     uint256 public constant MIN_PRICE = 10000;
     bool public emergencyMode;
 
-    event TokensBought(address indexed buyer, uint256 tokenAmount, uint256 usdcAmount, uint256 priceContribution, uint256 adminFee, uint256 newPrice);
-    event TokensSold(address indexed seller, uint256 tokenAmount, uint256 usdcAmount, uint256 priceContribution, uint256 adminFee, uint256 newPrice);
+
     event FeesUpdated(uint256 newBuyFee, uint256 newSellFee);
     event AdminAddressUpdated(address indexed newAdmin);
     event TokensWithdrawn(address indexed token, uint256 amount);
@@ -117,8 +116,7 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         bool success3 = token.transfer(msg.sender, tokenAmount);
         if (!success3) revert TransferFailed();
         
-        uint256 newPrice = getCurrentPrice();
-        emit TokensBought(msg.sender, tokenAmount, usdcAfterFee, priceContributionAmount, adminFeeAmount, newPrice);
+
     }
 
     function sellTokens(uint256 tokenAmount) external nonReentrant whenNotPaused notEmergency {
@@ -154,8 +152,7 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
             if (!success3) revert TransferFailed();
         }
 
-        uint256 newPrice = getCurrentPrice();
-        emit TokensSold(msg.sender, tokenAmount, usdcAfterFee, priceContributionAmount, adminFeeAmount, newPrice);
+
     }
 
     function updateFees(uint256 newBuyFee, uint256 newSellFee) external onlyOwner {
@@ -222,5 +219,29 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
     function unpause() external onlyOwner {
         require(!emergencyMode, "Cannot unpause in emergency mode");
         _unpause();
+    }
+    
+    function quoteTokensForUsdc(uint256 usdcAmount) external view returns (uint256) {
+        if (usdcAmount == 0) return 0;
+        
+        uint256 totalFeeAmount = (usdcAmount * buyFee) / FEE_PRECISION;
+        uint256 usdcAfterFee = usdcAmount - totalFeeAmount;
+        
+        uint256 price = getCurrentPrice();
+        uint256 tokenAmount = (usdcAfterFee * TOKEN_PRECISION) / price;
+        
+        return tokenAmount;
+    }
+    
+    function quoteUsdcForTokens(uint256 tokenAmount) external view returns (uint256) {
+        if (tokenAmount == 0) return 0;
+        
+        uint256 price = getCurrentPrice();
+        
+        uint256 usdcAmount = (tokenAmount * price) / TOKEN_PRECISION;
+        uint256 totalFeeAmount = (usdcAmount * sellFee) / FEE_PRECISION;
+        uint256 usdcAfterFee = usdcAmount - totalFeeAmount;
+        
+        return usdcAfterFee;
     }
 }
