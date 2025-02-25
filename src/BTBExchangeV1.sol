@@ -26,9 +26,10 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
     uint256 public constant PRICE_CONTRIBUTION_PORTION = 20;
     uint256 public constant FEE_PRECISION = 10000;
     uint256 public lastTradeBlock;
-    uint256 public constant MIN_PRICE = 10000; // 0.01 USDC with PRECISION = 1e6
+    uint256 public constant MIN_PRICE = 10000;
+    uint256 public constant MIN_EFFECTIVE_CIRCULATION = 1e16;
+    uint256 public constant MAX_INITIAL_PRICE = 100000;
     bool public emergencyMode;
-
 
     event FeesUpdated(uint256 newBuyFee, uint256 newSellFee);
     event AdminAddressUpdated(address indexed newAdmin);
@@ -74,15 +75,25 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
                                    totalSupply - contractTokenBalance : 0;
         
         if (circulatingSupply == 0) {
-            return MIN_PRICE; // 0.01 USDC
+            return MIN_PRICE;
         }
         
         uint256 effectiveUsdcBalance = usdc.balanceOf(address(this)) + usdcBorrowed;
         
-        // FIXED FORMULA: Only multiply by TOKEN_PRECISION to account for decimal difference
-        uint256 calculatedPrice = (effectiveUsdcBalance * TOKEN_PRECISION) / circulatingSupply;
+        uint256 effectiveCirculation = circulatingSupply;
+        if (circulatingSupply < MIN_EFFECTIVE_CIRCULATION) {
+            effectiveCirculation = MIN_EFFECTIVE_CIRCULATION;
+        }
         
-        return calculatedPrice < MIN_PRICE ? MIN_PRICE : calculatedPrice;
+        uint256 calculatedPrice = (effectiveUsdcBalance * TOKEN_PRECISION) / effectiveCirculation;
+        
+        if (calculatedPrice < MIN_PRICE) {
+            return MIN_PRICE;
+        } else if (calculatedPrice > MAX_INITIAL_PRICE && circulatingSupply < MIN_EFFECTIVE_CIRCULATION * 10) {
+            return MAX_INITIAL_PRICE;
+        } else {
+            return calculatedPrice;
+        }
     }
 
     function getEffectiveUsdcBalance() public view returns (uint256) {

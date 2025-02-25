@@ -12,8 +12,8 @@ contract DeployExchangeScript is Script {
         address deployer = vm.addr(deployerPrivateKey);
         
         // Token addresses
-        address btbYield = 0xAF36A1B261e42946F47B6eEd24db5478E9b46F16; // BTB token
-        address usdc = 0xE5c212De64a5481E719d7c6ee8d00F2Cb9a20864;    // USDC token
+        address btbYield = 0x656e098E175c614BF14e9cE5a17736E25322920B; // BTB token
+        address usdc = 0x452387742c56993A47F35425DdCbb05000681FC6;    // USDC token
         
         // Deploy BTBExchangeV1
         BTBExchangeV1 exchange = new BTBExchangeV1(
