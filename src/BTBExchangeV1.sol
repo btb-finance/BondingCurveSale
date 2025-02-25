@@ -18,7 +18,6 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
     uint256 public constant PRECISION = 1e6;
     uint256 public constant TOKEN_PRECISION = 1e18;
     uint256 public totalTokensSold;
-    uint256 public virtualUsdcBalance;
     uint256 public usdcReserve;
     uint256 public usdcWithdrawn;
     uint256 public usdcBorrowed;
@@ -36,10 +35,9 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
     event FeesUpdated(uint256 newBuyFee, uint256 newSellFee);
     event AdminAddressUpdated(address indexed newAdmin);
     event TokensWithdrawn(address indexed token, uint256 amount);
-    event UsdcWithdrawn(uint256 amount, uint256 remainingVirtualBalance);
+    event UsdcWithdrawn(uint256 amount, uint256 effectiveBalance);
     event ReserveUpdated(uint256 newReserve);
     event EmergencyModeSet(bool activated);
-    event VirtualBalanceUpdated(uint256 newVirtualBalance);
     event UsdcBorrowed(uint256 amount, uint256 totalBorrowed);
     event UsdcRepaid(uint256 amount, uint256 remainingBorrowed);
 
@@ -68,7 +66,6 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         token = IERC20(_token);
         usdc = IERC20(_usdc);
         adminAddress = _adminAddress;
-        virtualUsdcBalance = 0;
         usdcWithdrawn = 0;
         usdcBorrowed = 0;
     }
@@ -90,6 +87,10 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         return calculatedPrice < MIN_PRICE ? MIN_PRICE : calculatedPrice;
     }
 
+    function getEffectiveUsdcBalance() public view returns (uint256) {
+        return usdc.balanceOf(address(this)) + usdcBorrowed;
+    }
+
     function getActualUsdcBalance() public view returns (uint256) {
         return usdc.balanceOf(address(this));
     }
@@ -108,7 +109,6 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         
         require(token.balanceOf(address(this)) >= tokenAmount, "Insufficient tokens in contract");
 
-        virtualUsdcBalance += usdcAfterFee;
         usdcReserve += usdcAfterFee;
         totalTokensSold += tokenAmount;
         lastTradeBlock = block.number;
@@ -141,8 +141,6 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         if (usdcAfterFee > usdcReserve) revert InsufficientReserve();
         if (usdcAfterFee > usdc.balanceOf(address(this))) revert InsufficientReserve();
 
-        virtualUsdcBalance = virtualUsdcBalance > usdcAfterFee ? 
-                            virtualUsdcBalance - usdcAfterFee : 0;
         usdcReserve -= usdcAfterFee;
         totalTokensSold -= tokenAmount;
         lastTradeBlock = block.number;
@@ -183,7 +181,7 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         usdc.safeTransfer(msg.sender, amount);
         usdcWithdrawn += amount;
         
-        emit UsdcWithdrawn(amount, virtualUsdcBalance);
+        emit UsdcWithdrawn(amount, getEffectiveUsdcBalance());
     }
     
     function borrowUsdc(uint256 amount) external onlyOwner {
@@ -221,11 +219,6 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         emit ReserveUpdated(actualReserve);
     }
 
-    function updateVirtualUsdcBalance(uint256 newBalance) external onlyOwner {
-        virtualUsdcBalance = newBalance;
-        emit VirtualBalanceUpdated(newBalance);
-    }
-
     function setEmergencyMode(bool activated) external onlyOwner {
         emergencyMode = activated;
         if (activated) {
@@ -245,15 +238,10 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         IERC20(tokenAddress).safeTransfer(owner(), amount);
         
         if (tokenAddress == address(usdc)) {
-            emit UsdcWithdrawn(amount, virtualUsdcBalance);
+            emit UsdcWithdrawn(amount, getEffectiveUsdcBalance());
         } else {
             emit TokensWithdrawn(tokenAddress, amount);
         }
-    }
-
-    function syncVirtualBalance() external onlyOwner {
-        virtualUsdcBalance = usdc.balanceOf(address(this)) + usdcBorrowed;
-        emit VirtualBalanceUpdated(virtualUsdcBalance);
     }
 
     function pause() external onlyOwner {
