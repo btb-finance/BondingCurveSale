@@ -10,8 +10,8 @@ contract BuyBTBYScript is Script {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(deployerPrivateKey);
 
-        address usdc = 0x741973E28394F26F75CB1A09303aab3c43180D31;
-        address exchange = 0x12452904BE81b20eF06EE39fA2c7c49E27456EDf;
+        address usdc = 0x334f5A3ecC0c6dCea6d438a532B20dAe20806bC6;
+        address exchange = 0x728EAE530d80E29a27074903775421A41eFd614A;
         
         // Get contract instances
         MockUSDC usdcToken = MockUSDC(usdc);

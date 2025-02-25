@@ -201,31 +201,31 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         _unpause();
     }
     
-    function quoteTokensForUsdc(uint256 usdcAmount) external view returns (uint256) {
-        if (usdcAmount == 0) return 0;
+    function quoteTokensForUsdc(uint256 usdcAmount) external view returns (uint256 tokenAmount, uint256 adminFeeAmount, uint256 platformFeeAmount, uint256 totalFeeAmount) {
+        if (usdcAmount == 0) return (0, 0, 0, 0);
         
-        uint256 platformFeeAmount = (usdcAmount * buyFee) / FEE_PRECISION;
-        uint256 adminFeeAmount = (usdcAmount * adminFee) / FEE_PRECISION;
-        uint256 totalFeeAmount = platformFeeAmount + adminFeeAmount;
+        platformFeeAmount = (usdcAmount * buyFee) / FEE_PRECISION;
+        adminFeeAmount = (usdcAmount * adminFee) / FEE_PRECISION;
+        totalFeeAmount = platformFeeAmount + adminFeeAmount;
         uint256 usdcAfterFee = usdcAmount - totalFeeAmount;
         
         uint256 price = getCurrentPrice();
-        uint256 tokenAmount = (usdcAfterFee * TOKEN_PRECISION) / price;
+        tokenAmount = (usdcAfterFee * TOKEN_PRECISION) / price;
         
-        return tokenAmount;
+        return (tokenAmount, adminFeeAmount, platformFeeAmount, totalFeeAmount);
     }
     
-    function quoteUsdcForTokens(uint256 tokenAmount) external view returns (uint256) {
-        if (tokenAmount == 0) return 0;
+    function quoteUsdcForTokens(uint256 tokenAmount) external view returns (uint256 usdcAfterFee, uint256 adminFeeAmount, uint256 platformFeeAmount, uint256 totalFeeAmount) {
+        if (tokenAmount == 0) return (0, 0, 0, 0);
         
         uint256 price = getCurrentPrice();
         
         uint256 usdcAmount = (tokenAmount * price) / TOKEN_PRECISION;
-        uint256 platformFeeAmount = (usdcAmount * sellFee) / FEE_PRECISION;
-        uint256 adminFeeAmount = (usdcAmount * adminFee) / FEE_PRECISION;
-        uint256 totalFeeAmount = platformFeeAmount + adminFeeAmount;
-        uint256 usdcAfterFee = usdcAmount - totalFeeAmount;
+        platformFeeAmount = (usdcAmount * sellFee) / FEE_PRECISION;
+        adminFeeAmount = (usdcAmount * adminFee) / FEE_PRECISION;
+        totalFeeAmount = platformFeeAmount + adminFeeAmount;
+        usdcAfterFee = usdcAmount - totalFeeAmount;
         
-        return usdcAfterFee;
+        return (usdcAfterFee, adminFeeAmount, platformFeeAmount, totalFeeAmount);
     }
 }
