@@ -29,6 +29,7 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
     uint256 public constant MIN_PRICE = 10000;
     bool public emergencyMode;
 
+    event TokensBought(address indexed buyer, uint256 tokenAmount, uint256 usdcAmount, uint256 priceContribution, uint256 adminFee, uint256 newPrice);
     event TokensSold(address indexed seller, uint256 tokenAmount, uint256 usdcAmount, uint256 priceContribution, uint256 adminFee, uint256 newPrice);
     event FeesUpdated(uint256 newBuyFee, uint256 newSellFee);
     event AdminAddressUpdated(address indexed newAdmin);
@@ -62,7 +63,6 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         token = IERC20(_token);
         usdc = IERC20(_usdc);
         adminAddress = _adminAddress;
-        usdcWithdrawn = 0;
         usdcBorrowed = 0;
     }
 
@@ -104,21 +104,21 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         uint256 tokenAmount = (usdcAfterFee * TOKEN_PRECISION) / price;
         
         require(token.balanceOf(address(this)) >= tokenAmount, "Insufficient tokens in contract");
-
    
+        bool success1 = usdc.transferFrom(msg.sender, address(this), usdcAfterFee + priceContributionAmount);
+        if (!success1) revert TransferFailed();
+        
+        bool success2 = usdc.transferFrom(msg.sender, adminAddress, adminFeeAmount);
+        if (!success2) revert TransferFailed();
+
         totalTokensSold += tokenAmount;
         lastTradeBlock = block.number;
 
-        bool success1 = token.transfer(msg.sender, tokenAmount);
-        if (!success1) revert TransferFailed();
-        
-        bool success2 = usdc.transferFrom(msg.sender, address(this), usdcAfterFee + priceContributionAmount);
-        if (!success2) revert TransferFailed();
-        
-        bool success3 = usdc.transferFrom(msg.sender, adminAddress, adminFeeAmount);
+        bool success3 = token.transfer(msg.sender, tokenAmount);
         if (!success3) revert TransferFailed();
-
-       
+        
+        uint256 newPrice = getCurrentPrice();
+        emit TokensBought(msg.sender, tokenAmount, usdcAfterFee, priceContributionAmount, adminFeeAmount, newPrice);
     }
 
     function sellTokens(uint256 tokenAmount) external nonReentrant whenNotPaused notEmergency {
@@ -133,15 +133,18 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         uint256 priceContributionAmount = (usdcAmount * PRICE_CONTRIBUTION_PORTION) / FEE_PRECISION;
         uint256 usdcAfterFee = usdcAmount - totalFeeAmount;
 
-     
-        if (usdcAfterFee > usdc.balanceOf(address(this))) revert InsufficientReserve();
-
-       
-        totalTokensSold -= tokenAmount;
-        lastTradeBlock = block.number;
+        uint256 totalUsdcNeeded = usdcAfterFee;
+        if (adminFeeAmount > 0) {
+            totalUsdcNeeded += adminFeeAmount;
+        }
+        
+        if (totalUsdcNeeded > usdc.balanceOf(address(this))) revert InsufficientReserve();
 
         bool success1 = token.transferFrom(msg.sender, address(this), tokenAmount);
         if (!success1) revert TransferFailed();
+        
+        totalTokensSold -= tokenAmount;
+        lastTradeBlock = block.number;
         
         bool success2 = usdc.transfer(msg.sender, usdcAfterFee);
         if (!success2) revert TransferFailed();
@@ -189,35 +192,27 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         emit UsdcRepaid(amount, usdcBorrowed);
     }
     
-    function withdrawToken(address tokenAddress, uint256 amount) external onlyOwner {
-        if (tokenAddress == address(token)) {
-            uint256 excessTokens = token.balanceOf(address(this)) - totalTokensSold;
-            require(amount <= excessTokens, "Cannot withdraw from circulating supply");
-        }
-        IERC20(tokenAddress).safeTransfer(msg.sender, amount);
-        emit TokensWithdrawn(tokenAddress, amount);
-    }
-    
-    function setEmergencyMode(bool activated) external onlyOwner {
-        emergencyMode = activated;
-        if (activated) {
-            _pause();
-        }
-        emit EmergencyModeSet(activated);
-    }
-
     function recoverERC20(address tokenAddress, uint256 amount) external onlyOwner {
         if (tokenAddress == address(usdc)) {
-            
+            uint256 minLiquidity = totalTokensSold * MIN_PRICE / TOKEN_PRECISION;
+            require(usdc.balanceOf(address(this)) - amount >= minLiquidity, "Must maintain minimum liquidity");
         } else if (tokenAddress == address(token)) {
             uint256 excessTokens = token.balanceOf(address(this)) - totalTokensSold;
             require(amount <= excessTokens, "Cannot withdraw from circulating supply");
         }
         IERC20(tokenAddress).safeTransfer(owner(), amount);
         
-        if (tokenAddress != address(usdc)) {
-            emit TokensWithdrawn(tokenAddress, amount);
+        emit TokensWithdrawn(tokenAddress, amount);
+    }
+
+    function setEmergencyMode(bool activated) external onlyOwner {
+        emergencyMode = activated;
+        if (activated) {
+            _pause();
+        } else {
+            _unpause();
         }
+        emit EmergencyModeSet(activated);
     }
 
     function pause() external onlyOwner {
@@ -225,6 +220,7 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
     }
 
     function unpause() external onlyOwner {
+        require(!emergencyMode, "Cannot unpause in emergency mode");
         _unpause();
     }
 }
