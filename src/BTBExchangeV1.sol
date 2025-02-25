@@ -26,7 +26,7 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
     uint256 public constant PRICE_CONTRIBUTION_PORTION = 20;
     uint256 public constant FEE_PRECISION = 10000;
     uint256 public lastTradeBlock;
-    uint256 public constant MIN_PRICE = 10000;
+    uint256 public constant MIN_PRICE = 10000; // 0.01 USDC with PRECISION = 1e6
     bool public emergencyMode;
 
 
@@ -74,11 +74,13 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
                                    totalSupply - contractTokenBalance : 0;
         
         if (circulatingSupply == 0) {
-            return MIN_PRICE;
+            return MIN_PRICE; // 0.01 USDC
         }
         
         uint256 effectiveUsdcBalance = usdc.balanceOf(address(this)) + usdcBorrowed;
-        uint256 calculatedPrice = (effectiveUsdcBalance * PRECISION * TOKEN_PRECISION) / circulatingSupply;
+        
+        // FIXED FORMULA: Only multiply by TOKEN_PRECISION to account for decimal difference
+        uint256 calculatedPrice = (effectiveUsdcBalance * TOKEN_PRECISION) / circulatingSupply;
         
         return calculatedPrice < MIN_PRICE ? MIN_PRICE : calculatedPrice;
     }
@@ -116,8 +118,6 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
 
         bool success3 = token.transfer(msg.sender, tokenAmount);
         if (!success3) revert TransferFailed();
-        
-
     }
 
     function sellTokens(uint256 tokenAmount) external nonReentrant whenNotPaused notEmergency {
@@ -151,8 +151,6 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
             bool success3 = usdc.transfer(adminAddress, adminFeeAmount);
             if (!success3) revert TransferFailed();
         }
-
-
     }
 
     function updateFees(uint256 newBuyFee, uint256 newSellFee) external onlyOwner {
