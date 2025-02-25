@@ -32,6 +32,8 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
     event TokensWithdrawn(address indexed token, uint256 amount);
     event UsdcBorrowed(uint256 amount, uint256 totalBorrowed);
     event UsdcRepaid(uint256 amount, uint256 remainingBorrowed);
+    event TokensBought(address indexed buyer, uint256 usdcAmount, uint256 tokenAmount, uint256 totalFeePercent);
+    event TokensSold(address indexed seller, uint256 tokenAmount, uint256 usdcAmount, uint256 totalFeePercent);
 
     error SameBlockTrade();
     error PriceBelowMinimum();
@@ -92,12 +94,21 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         return usdc.balanceOf(address(this));
     }
 
+    function getTotalFee() public view returns (uint256) {
+        return buyFee + adminFee;
+    }
+
+    function getSellTotalFee() public view returns (uint256) {
+        return sellFee + adminFee;
+    }
+
     function buyTokens(uint256 usdcAmount) external nonReentrant whenNotPaused {
         if (usdcAmount == 0) revert InvalidAmount();
         if (block.number == lastTradeBlock) revert SameBlockTrade();
 
-        uint256 totalFeeAmount = (usdcAmount * buyFee) / FEE_PRECISION;
+        uint256 platformFeeAmount = (usdcAmount * buyFee) / FEE_PRECISION;
         uint256 adminFeeAmount = (usdcAmount * adminFee) / FEE_PRECISION;
+        uint256 totalFeeAmount = platformFeeAmount + adminFeeAmount;
         uint256 usdcAfterFee = usdcAmount - totalFeeAmount;
         
         uint256 price = getCurrentPrice();
@@ -111,6 +122,8 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         lastTradeBlock = block.number;
 
         token.safeTransfer(msg.sender, tokenAmount);
+        
+        emit TokensBought(msg.sender, usdcAmount, tokenAmount, buyFee + adminFee);
     }
 
     function sellTokens(uint256 tokenAmount) external nonReentrant whenNotPaused {
@@ -120,13 +133,13 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         uint256 price = getCurrentPrice();
         
         uint256 usdcAmount = (tokenAmount * price) / TOKEN_PRECISION;
-        uint256 totalFeeAmount = (usdcAmount * sellFee) / FEE_PRECISION;
+        uint256 platformFeeAmount = (usdcAmount * sellFee) / FEE_PRECISION;
         uint256 adminFeeAmount = (usdcAmount * adminFee) / FEE_PRECISION;
+        uint256 totalFeeAmount = platformFeeAmount + adminFeeAmount;
         uint256 usdcAfterFee = usdcAmount - totalFeeAmount;
 
-        uint256 totalUsdcNeeded = usdcAfterFee + adminFeeAmount;
-        
-        if (totalUsdcNeeded > usdc.balanceOf(address(this))) revert InsufficientReserve();
+        if (usdcAfterFee + adminFeeAmount > usdc.balanceOf(address(this))) 
+            revert InsufficientReserve();
 
         token.safeTransferFrom(msg.sender, address(this), tokenAmount);
         
@@ -134,6 +147,8 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         
         usdc.safeTransfer(msg.sender, usdcAfterFee);
         usdc.safeTransfer(adminAddress, adminFeeAmount);
+        
+        emit TokensSold(msg.sender, tokenAmount, usdcAfterFee, sellFee + adminFee);
     }
 
     function updateFees(uint256 newBuyFee, uint256 newSellFee, uint256 newAdminFee) external onlyOwner {
@@ -189,7 +204,9 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
     function quoteTokensForUsdc(uint256 usdcAmount) external view returns (uint256) {
         if (usdcAmount == 0) return 0;
         
-        uint256 totalFeeAmount = (usdcAmount * buyFee) / FEE_PRECISION;
+        uint256 platformFeeAmount = (usdcAmount * buyFee) / FEE_PRECISION;
+        uint256 adminFeeAmount = (usdcAmount * adminFee) / FEE_PRECISION;
+        uint256 totalFeeAmount = platformFeeAmount + adminFeeAmount;
         uint256 usdcAfterFee = usdcAmount - totalFeeAmount;
         
         uint256 price = getCurrentPrice();
@@ -204,7 +221,9 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         uint256 price = getCurrentPrice();
         
         uint256 usdcAmount = (tokenAmount * price) / TOKEN_PRECISION;
-        uint256 totalFeeAmount = (usdcAmount * sellFee) / FEE_PRECISION;
+        uint256 platformFeeAmount = (usdcAmount * sellFee) / FEE_PRECISION;
+        uint256 adminFeeAmount = (usdcAmount * adminFee) / FEE_PRECISION;
+        uint256 totalFeeAmount = platformFeeAmount + adminFeeAmount;
         uint256 usdcAfterFee = usdcAmount - totalFeeAmount;
         
         return usdcAfterFee;
