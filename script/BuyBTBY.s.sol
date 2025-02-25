@@ -10,8 +10,8 @@ contract BuyBTBYScript is Script {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(deployerPrivateKey);
 
-        address usdc = 0x452387742c56993A47F35425DdCbb05000681FC6;
-        address exchange = 0xEed45965dd5DD2Fed4EA614fFA29cFF6CE974914;
+        address usdc = 0x741973E28394F26F75CB1A09303aab3c43180D31;
+        address exchange = 0x12452904BE81b20eF06EE39fA2c7c49E27456EDf;
         
         // Get contract instances
         MockUSDC usdcToken = MockUSDC(usdc);
@@ -23,7 +23,7 @@ contract BuyBTBYScript is Script {
         console.log("Approved USDC spending. Amount:", approveAmount);
         
         // Buy BTBY tokens with 100 USDC
-        uint256 buyAmount = 10000 * 10**6;
+        uint256 buyAmount = 1000 * 10**6;
         btbExchange.buyTokens(buyAmount);
         console.log("Bought BTBY tokens with USDC amount:", buyAmount);
 
