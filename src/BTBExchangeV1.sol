@@ -18,8 +18,7 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
     uint256 public constant PRECISION = 1e6;
     uint256 public constant TOKEN_PRECISION = 1e18;
     uint256 public totalTokensSold;
-    uint256 public usdcReserve;
-    uint256 public usdcWithdrawn;
+    
     uint256 public usdcBorrowed;
     uint256 public buyFee = 30;
     uint256 public sellFee = 30;
@@ -106,7 +105,7 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         
         require(token.balanceOf(address(this)) >= tokenAmount, "Insufficient tokens in contract");
 
-        usdcReserve += usdcAfterFee;
+   
         totalTokensSold += tokenAmount;
         lastTradeBlock = block.number;
 
@@ -119,7 +118,7 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         bool success3 = usdc.transferFrom(msg.sender, adminAddress, adminFeeAmount);
         if (!success3) revert TransferFailed();
 
-        // Price calculation happens automatically through state changes
+       
     }
 
     function sellTokens(uint256 tokenAmount) external nonReentrant whenNotPaused notEmergency {
@@ -134,10 +133,10 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         uint256 priceContributionAmount = (usdcAmount * PRICE_CONTRIBUTION_PORTION) / FEE_PRECISION;
         uint256 usdcAfterFee = usdcAmount - totalFeeAmount;
 
-        if (usdcAfterFee > usdcReserve) revert InsufficientReserve();
+     
         if (usdcAfterFee > usdc.balanceOf(address(this))) revert InsufficientReserve();
 
-        usdcReserve -= usdcAfterFee;
+       
         totalTokensSold -= tokenAmount;
         lastTradeBlock = block.number;
 
@@ -170,16 +169,8 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         emit AdminAddressUpdated(newAdmin);
     }
 
-    function withdrawUsdc(uint256 amount) external onlyOwner {
-        uint256 availableToWithdraw = usdc.balanceOf(address(this)) - usdcReserve;
-        require(amount <= availableToWithdraw, "Cannot withdraw from reserves");
-        
-        usdc.safeTransfer(msg.sender, amount);
-        usdcWithdrawn += amount;
-    }
-    
     function borrowUsdc(uint256 amount) external onlyOwner {
-        uint256 availableToWithdraw = usdc.balanceOf(address(this)) - usdcReserve;
+        uint256 availableToWithdraw = usdc.balanceOf(address(this));
         require(amount <= availableToWithdraw, "Cannot borrow from reserves");
         
         usdc.safeTransfer(msg.sender, amount);
@@ -207,11 +198,6 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         emit TokensWithdrawn(tokenAddress, amount);
     }
     
-    function updateUsdcReserve() external onlyOwner {
-        uint256 actualReserve = usdc.balanceOf(address(this));
-        usdcReserve = actualReserve;
-    }
-
     function setEmergencyMode(bool activated) external onlyOwner {
         emergencyMode = activated;
         if (activated) {
@@ -222,8 +208,7 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
 
     function recoverERC20(address tokenAddress, uint256 amount) external onlyOwner {
         if (tokenAddress == address(usdc)) {
-            require(amount <= usdc.balanceOf(address(this)) - usdcReserve, "Cannot withdraw from reserves");
-            usdcWithdrawn += amount;
+            
         } else if (tokenAddress == address(token)) {
             uint256 excessTokens = token.balanceOf(address(this)) - totalTokensSold;
             require(amount <= excessTokens, "Cannot withdraw from circulating supply");
