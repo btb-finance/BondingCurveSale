@@ -9,8 +9,8 @@ contract TransferTokensScript is Script {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(deployerPrivateKey);
 
-        address exchangeAddress = 0x36B8c4D45dF7E09325991b185262580bA34e1298;
-        BTBYield token = BTBYield(0xf2DfA80e04287186D73431Af0Ab09321D8E97DbA);
+        address exchangeAddress = 0x1cEE9Bd2bdCD04e3880a51210AC78F5D70DD1B9B;
+        BTBYield token = BTBYield(0xAF36A1B261e42946F47B6eEd24db5478E9b46F16);
         
         // Get deployer's balance
         address deployer = vm.addr(deployerPrivateKey);

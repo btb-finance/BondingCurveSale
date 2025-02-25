@@ -8,7 +8,7 @@ import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 
-contract BTBExchangeV1 is Ownable(msg.sender), ReentrancyGuard, Pausable {
+contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
     using Address for address;
 
@@ -63,6 +63,7 @@ contract BTBExchangeV1 is Ownable(msg.sender), ReentrancyGuard, Pausable {
         usdc = IERC20(_usdc);
         adminAddress = _adminAddress;
         usdcBorrowed = 0;
+        _transferOwnership(msg.sender);
     }
 
     function getCurrentPrice() public view returns (uint256) {

@@ -10,8 +10,8 @@ contract BuyTokensScript is Script {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(deployerPrivateKey);
 
-        address exchangeAddress = 0xBb535A3dbeEa0e2eAce9dF4caFEA8A1a4d0D8Ff6;
-        address usdcAddress = 0x0EC98Aa4218e9dB07C8fF0D2ADe4b8e8e6DD2E5F;
+        address exchangeAddress = 0x1cEE9Bd2bdCD04e3880a51210AC78F5D70DD1B9B;
+        address usdcAddress = 0xE5c212De64a5481E719d7c6ee8d00F2Cb9a20864;
         
         // Get contract instances
         BTBExchangeV1 exchange = BTBExchangeV1(exchangeAddress);
@@ -21,11 +21,9 @@ contract BuyTokensScript is Script {
         uint256 currentPrice = exchange.getCurrentPrice();
         console.log("Current price (in USDC with 6 decimals):", currentPrice);
         
-        // We want to buy 100 tokens
-        // Each token costs 0.01 USDC (10000 with 6 decimals)
-        // Total cost = 100 * 0.01 = 1 USDC
-        // Plus 1% fee = 1.01 USDC
-        uint256 usdcAmount = 1010000; // 1.01 USDC with 6 decimals
+        // We want to buy 1000 tokens
+        // Plus fee
+        uint256 usdcAmount = 10_000 * 10**6; // 10,000 USDC
         
         // First approve USDC spending
         usdc.approve(exchangeAddress, usdcAmount);
