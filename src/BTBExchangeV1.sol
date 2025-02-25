@@ -8,7 +8,7 @@ import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 
-contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
+contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
     using Address for address;
 
@@ -21,6 +21,7 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
     uint256 public virtualUsdcBalance;
     uint256 public usdcReserve;
     uint256 public usdcWithdrawn;
+    uint256 public usdcBorrowed;
     uint256 public buyFee = 30;
     uint256 public sellFee = 30;
     uint256 public constant ADMIN_FEE_PORTION = 10;
@@ -39,6 +40,8 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
     event ReserveUpdated(uint256 newReserve);
     event EmergencyModeSet(bool activated);
     event VirtualBalanceUpdated(uint256 newVirtualBalance);
+    event UsdcBorrowed(uint256 amount, uint256 totalBorrowed);
+    event UsdcRepaid(uint256 amount, uint256 remainingBorrowed);
 
     error SameBlockTrade();
     error PriceBelowMinimum();
@@ -67,6 +70,7 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
         adminAddress = _adminAddress;
         virtualUsdcBalance = 0;
         usdcWithdrawn = 0;
+        usdcBorrowed = 0;
     }
 
     function getCurrentPrice() public view returns (uint256) {
@@ -80,8 +84,8 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
             return MIN_PRICE;
         }
         
-        // Calculate price based on virtual USDC balance and circulating supply
-        uint256 calculatedPrice = (virtualUsdcBalance * PRECISION * TOKEN_PRECISION) / circulatingSupply;
+        uint256 effectiveUsdcBalance = usdc.balanceOf(address(this)) + usdcBorrowed;
+        uint256 calculatedPrice = (effectiveUsdcBalance * PRECISION * TOKEN_PRECISION) / circulatingSupply;
         
         return calculatedPrice < MIN_PRICE ? MIN_PRICE : calculatedPrice;
     }
@@ -104,7 +108,6 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
         
         require(token.balanceOf(address(this)) >= tokenAmount, "Insufficient tokens in contract");
 
-        // Update the virtual USDC balance
         virtualUsdcBalance += usdcAfterFee;
         usdcReserve += usdcAfterFee;
         totalTokensSold += tokenAmount;
@@ -138,7 +141,6 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
         if (usdcAfterFee > usdcReserve) revert InsufficientReserve();
         if (usdcAfterFee > usdc.balanceOf(address(this))) revert InsufficientReserve();
 
-        // Update the virtual USDC balance
         virtualUsdcBalance = virtualUsdcBalance > usdcAfterFee ? 
                             virtualUsdcBalance - usdcAfterFee : 0;
         usdcReserve -= usdcAfterFee;
@@ -182,6 +184,26 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
         usdcWithdrawn += amount;
         
         emit UsdcWithdrawn(amount, virtualUsdcBalance);
+    }
+    
+    function borrowUsdc(uint256 amount) external onlyOwner {
+        uint256 availableToWithdraw = usdc.balanceOf(address(this)) - usdcReserve;
+        require(amount <= availableToWithdraw, "Cannot borrow from reserves");
+        
+        usdc.safeTransfer(msg.sender, amount);
+        usdcBorrowed += amount;
+        
+        emit UsdcBorrowed(amount, usdcBorrowed);
+    }
+    
+    function repayUsdc(uint256 amount) external {
+        require(amount > 0, "Amount must be greater than zero");
+        require(usdcBorrowed >= amount, "Repayment exceeds borrowed amount");
+        
+        usdc.safeTransferFrom(msg.sender, address(this), amount);
+        usdcBorrowed -= amount;
+        
+        emit UsdcRepaid(amount, usdcBorrowed);
     }
     
     function withdrawToken(address tokenAddress, uint256 amount) external onlyOwner {
@@ -230,7 +252,7 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
     }
 
     function syncVirtualBalance() external onlyOwner {
-        virtualUsdcBalance = usdc.balanceOf(address(this)) + usdcWithdrawn;
+        virtualUsdcBalance = usdc.balanceOf(address(this)) + usdcBorrowed;
         emit VirtualBalanceUpdated(virtualUsdcBalance);
     }
 
