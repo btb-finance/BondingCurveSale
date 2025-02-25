@@ -18,8 +18,9 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
     uint256 public constant PRECISION = 1e6;
     uint256 public constant TOKEN_PRECISION = 1e18;
     uint256 public totalTokensSold;
-    uint256 public totalUsdcContributed;
+    uint256 public virtualUsdcBalance;
     uint256 public usdcReserve;
+    uint256 public usdcWithdrawn;
     uint256 public buyFee = 30;
     uint256 public sellFee = 30;
     uint256 public constant ADMIN_FEE_PORTION = 10;
@@ -28,17 +29,16 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
     uint256 public lastTradeBlock;
     uint256 public constant MIN_PRICE = 10000;
     bool public emergencyMode;
-    uint256 public priceIncreaseFactor = 20;
-    uint256 public currentPrice;
 
     event TokensPurchased(address indexed buyer, uint256 usdcAmount, uint256 tokenAmount, uint256 priceContribution, uint256 adminFee, uint256 newPrice);
     event TokensSold(address indexed seller, uint256 tokenAmount, uint256 usdcAmount, uint256 priceContribution, uint256 adminFee, uint256 newPrice);
     event FeesUpdated(uint256 newBuyFee, uint256 newSellFee);
     event AdminAddressUpdated(address indexed newAdmin);
     event TokensWithdrawn(address indexed token, uint256 amount);
+    event UsdcWithdrawn(uint256 amount, uint256 remainingVirtualBalance);
     event ReserveUpdated(uint256 newReserve);
     event EmergencyModeSet(bool activated);
-    event PriceIncreaseFactorUpdated(uint256 newFactor);
+    event VirtualBalanceUpdated(uint256 newVirtualBalance);
 
     error SameBlockTrade();
     error PriceBelowMinimum();
@@ -65,14 +65,11 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
         token = IERC20(_token);
         usdc = IERC20(_usdc);
         adminAddress = _adminAddress;
-        currentPrice = MIN_PRICE;
+        virtualUsdcBalance = 0;
+        usdcWithdrawn = 0;
     }
 
     function getCurrentPrice() public view returns (uint256) {
-        return currentPrice < MIN_PRICE ? MIN_PRICE : currentPrice;
-    }
-
-    function calculateBasePrice() internal view returns (uint256) {
         uint256 totalSupply = token.totalSupply();
         uint256 contractTokenBalance = token.balanceOf(address(this));
         
@@ -83,8 +80,14 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
             return MIN_PRICE;
         }
         
-        uint256 basePrice = (totalUsdcContributed * PRECISION * TOKEN_PRECISION) / circulatingSupply;
-        return basePrice < MIN_PRICE ? MIN_PRICE : basePrice;
+        // Calculate price based on virtual USDC balance and circulating supply
+        uint256 calculatedPrice = (virtualUsdcBalance * PRECISION * TOKEN_PRECISION) / circulatingSupply;
+        
+        return calculatedPrice < MIN_PRICE ? MIN_PRICE : calculatedPrice;
+    }
+
+    function getActualUsdcBalance() public view returns (uint256) {
+        return usdc.balanceOf(address(this));
     }
 
     function buyTokens(uint256 usdcAmount) external nonReentrant whenNotPaused notEmergency {
@@ -101,16 +104,11 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
         
         require(token.balanceOf(address(this)) >= tokenAmount, "Insufficient tokens in contract");
 
-        totalUsdcContributed += (usdcAmount - adminFeeAmount);
+        // Update the virtual USDC balance
+        virtualUsdcBalance += usdcAfterFee;
         usdcReserve += usdcAfterFee;
         totalTokensSold += tokenAmount;
         lastTradeBlock = block.number;
-        
-        uint256 basePrice = calculateBasePrice();
-        currentPrice = price + (price * priceIncreaseFactor / FEE_PRECISION);
-        if (currentPrice < basePrice) {
-            currentPrice = basePrice;
-        }
 
         bool success1 = token.transfer(msg.sender, tokenAmount);
         if (!success1) revert TransferFailed();
@@ -121,7 +119,8 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
         bool success3 = usdc.transferFrom(msg.sender, adminAddress, adminFeeAmount);
         if (!success3) revert TransferFailed();
 
-        emit TokensPurchased(msg.sender, usdcAmount, tokenAmount, priceContributionAmount, adminFeeAmount, currentPrice);
+        uint256 newPrice = getCurrentPrice();
+        emit TokensPurchased(msg.sender, usdcAmount, tokenAmount, priceContributionAmount, adminFeeAmount, newPrice);
     }
 
     function sellTokens(uint256 tokenAmount) external nonReentrant whenNotPaused notEmergency {
@@ -137,9 +136,11 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
         uint256 usdcAfterFee = usdcAmount - totalFeeAmount;
 
         if (usdcAfterFee > usdcReserve) revert InsufficientReserve();
+        if (usdcAfterFee > usdc.balanceOf(address(this))) revert InsufficientReserve();
 
-        currentPrice = price + (price * priceIncreaseFactor / FEE_PRECISION);
-
+        // Update the virtual USDC balance
+        virtualUsdcBalance = virtualUsdcBalance > usdcAfterFee ? 
+                            virtualUsdcBalance - usdcAfterFee : 0;
         usdcReserve -= usdcAfterFee;
         totalTokensSold -= tokenAmount;
         lastTradeBlock = block.number;
@@ -155,7 +156,8 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
             if (!success3) revert TransferFailed();
         }
 
-        emit TokensSold(msg.sender, tokenAmount, usdcAfterFee, priceContributionAmount, adminFeeAmount, currentPrice);
+        uint256 newPrice = getCurrentPrice();
+        emit TokensSold(msg.sender, tokenAmount, usdcAfterFee, priceContributionAmount, adminFeeAmount, newPrice);
     }
 
     function updateFees(uint256 newBuyFee, uint256 newSellFee) external onlyOwner {
@@ -166,12 +168,6 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
         emit FeesUpdated(newBuyFee, newSellFee);
     }
 
-    function updatePriceIncreaseFactor(uint256 newFactor) external onlyOwner {
-        require(newFactor <= FEE_PRECISION, "Factor too high");
-        priceIncreaseFactor = newFactor;
-        emit PriceIncreaseFactorUpdated(newFactor);
-    }
-
     function updateAdminAddress(address newAdmin) external onlyOwner {
         require(newAdmin != address(0), "Invalid admin address");
         adminAddress = newAdmin;
@@ -179,8 +175,13 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
     }
 
     function withdrawUsdc(uint256 amount) external onlyOwner {
-        require(amount <= usdc.balanceOf(address(this)) - usdcReserve, "Cannot withdraw from reserves");
+        uint256 availableToWithdraw = usdc.balanceOf(address(this)) - usdcReserve;
+        require(amount <= availableToWithdraw, "Cannot withdraw from reserves");
+        
         usdc.safeTransfer(msg.sender, amount);
+        usdcWithdrawn += amount;
+        
+        emit UsdcWithdrawn(amount, virtualUsdcBalance);
     }
     
     function withdrawToken(address tokenAddress, uint256 amount) external onlyOwner {
@@ -198,6 +199,11 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
         emit ReserveUpdated(actualReserve);
     }
 
+    function updateVirtualUsdcBalance(uint256 newBalance) external onlyOwner {
+        virtualUsdcBalance = newBalance;
+        emit VirtualBalanceUpdated(newBalance);
+    }
+
     function setEmergencyMode(bool activated) external onlyOwner {
         emergencyMode = activated;
         if (activated) {
@@ -209,16 +215,23 @@ contract BTBExchangeV2 is Ownable, ReentrancyGuard, Pausable {
     function recoverERC20(address tokenAddress, uint256 amount) external onlyOwner {
         if (tokenAddress == address(usdc)) {
             require(amount <= usdc.balanceOf(address(this)) - usdcReserve, "Cannot withdraw from reserves");
+            usdcWithdrawn += amount;
         } else if (tokenAddress == address(token)) {
             uint256 excessTokens = token.balanceOf(address(this)) - totalTokensSold;
             require(amount <= excessTokens, "Cannot withdraw from circulating supply");
         }
         IERC20(tokenAddress).safeTransfer(owner(), amount);
-        emit TokensWithdrawn(tokenAddress, amount);
+        
+        if (tokenAddress == address(usdc)) {
+            emit UsdcWithdrawn(amount, virtualUsdcBalance);
+        } else {
+            emit TokensWithdrawn(tokenAddress, amount);
+        }
     }
 
-    function resetPrice() external onlyOwner {
-        currentPrice = calculateBasePrice();
+    function syncVirtualBalance() external onlyOwner {
+        virtualUsdcBalance = usdc.balanceOf(address(this)) + usdcWithdrawn;
+        emit VirtualBalanceUpdated(virtualUsdcBalance);
     }
 
     function pause() external onlyOwner {
