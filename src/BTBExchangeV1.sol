@@ -30,13 +30,10 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
     uint256 public constant MIN_PRICE = 10000;
     bool public emergencyMode;
 
-    event TokensPurchased(address indexed buyer, uint256 usdcAmount, uint256 tokenAmount, uint256 priceContribution, uint256 adminFee, uint256 newPrice);
     event TokensSold(address indexed seller, uint256 tokenAmount, uint256 usdcAmount, uint256 priceContribution, uint256 adminFee, uint256 newPrice);
     event FeesUpdated(uint256 newBuyFee, uint256 newSellFee);
     event AdminAddressUpdated(address indexed newAdmin);
     event TokensWithdrawn(address indexed token, uint256 amount);
-    event UsdcWithdrawn(uint256 amount, uint256 effectiveBalance);
-    event ReserveUpdated(uint256 newReserve);
     event EmergencyModeSet(bool activated);
     event UsdcBorrowed(uint256 amount, uint256 totalBorrowed);
     event UsdcRepaid(uint256 amount, uint256 remainingBorrowed);
@@ -122,8 +119,7 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         bool success3 = usdc.transferFrom(msg.sender, adminAddress, adminFeeAmount);
         if (!success3) revert TransferFailed();
 
-        uint256 newPrice = getCurrentPrice();
-        emit TokensPurchased(msg.sender, usdcAmount, tokenAmount, priceContributionAmount, adminFeeAmount, newPrice);
+        // Price calculation happens automatically through state changes
     }
 
     function sellTokens(uint256 tokenAmount) external nonReentrant whenNotPaused notEmergency {
@@ -180,8 +176,6 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         
         usdc.safeTransfer(msg.sender, amount);
         usdcWithdrawn += amount;
-        
-        emit UsdcWithdrawn(amount, getEffectiveUsdcBalance());
     }
     
     function borrowUsdc(uint256 amount) external onlyOwner {
@@ -216,7 +210,6 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
     function updateUsdcReserve() external onlyOwner {
         uint256 actualReserve = usdc.balanceOf(address(this));
         usdcReserve = actualReserve;
-        emit ReserveUpdated(actualReserve);
     }
 
     function setEmergencyMode(bool activated) external onlyOwner {
@@ -237,9 +230,7 @@ contract BTBExchangeV1 is Ownable, ReentrancyGuard, Pausable {
         }
         IERC20(tokenAddress).safeTransfer(owner(), amount);
         
-        if (tokenAddress == address(usdc)) {
-            emit UsdcWithdrawn(amount, getEffectiveUsdcBalance());
-        } else {
+        if (tokenAddress != address(usdc)) {
             emit TokensWithdrawn(tokenAddress, amount);
         }
     }
