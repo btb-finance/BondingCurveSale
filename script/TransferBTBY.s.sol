@@ -9,8 +9,8 @@ contract TransferBTBYScript is Script {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(deployerPrivateKey);
 
-        address btbYield = 0x656e098E175c614BF14e9cE5a17736E25322920B;
-        address exchange = 0xEed45965dd5DD2Fed4EA614fFA29cFF6CE974914;
+        address btbYield = 0x47170eA51BF13019d7e1Eb666a0D2e19767d2397;
+        address exchange = 0xa1bA1F0210319dd7e8abd51229012B692420a346;
         
         // Get the BTBYield contract instance
         BTBYield token = BTBYield(btbYield);

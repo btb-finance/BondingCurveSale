@@ -1,0 +1,23 @@
+{
+  "name": "bonding-curve-sale",
+  "version": "1.0.0",
+  "description": "BTB Bonding Curve Exchange Contract",
+  "scripts": {
+    "test": "forge test",
+    "build": "forge build",
+    "deploy:sepolia": "forge script script/DeployExchange.s.sol --rpc-url $OP_SEPOLIA_RPC_URL --broadcast --verify",
+    "format": "forge fmt",
+    "lint": "solhint 'src/**/*.sol'"
+  },
+  "keywords": [
+    "ethereum",
+    "solidity",
+    "defi",
+    "bonding-curve"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "solhint": "^3.6.2"
+  }
+}
